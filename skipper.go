@@ -13,7 +13,7 @@ type SkipperConf struct {
 	// paths (regular expressions) or endpoints (ex: `/ping/:id`) to exclude from dumping response bodies
 	DumpNoResponseBodyForPaths []string
 
-	// paths (regular expressions) or endpoints (ex: `/ping/:id`) to exclude from dumping request bodies (regular expressions)
+	// paths (regular expressions) or endpoints (ex: `/ping/:id`) to exclude from dumping request bodies
 	DumpNoRequestBodyForPaths []string
 }
 
