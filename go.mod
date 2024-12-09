@@ -3,7 +3,7 @@ module github.com/adlandh/echo-dump-body-skipper
 go 1.22
 
 require (
-	github.com/labstack/echo/v4 v4.12.0
+	github.com/labstack/echo/v4 v4.13.0
 	github.com/stretchr/testify v1.10.0
 )
 
