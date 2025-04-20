@@ -20,7 +20,7 @@ func TestSkipper(t *testing.T) {
 
 		router := echo.New()
 		router.GET("/ping/:id", func(c echo.Context) error {
-			skipReqBody, skipRespBody := skipper(c)
+			skipReqBody, skipRespBody := skipper.Skip(c)
 			require.False(t, skipReqBody)
 			require.True(t, skipRespBody)
 
@@ -41,7 +41,7 @@ func TestSkipper(t *testing.T) {
 
 		router := echo.New()
 		router.GET("/ping/:id", func(c echo.Context) error {
-			skipReqBody, skipRespBody := skipper(c)
+			skipReqBody, skipRespBody := skipper.Skip(c)
 			require.True(t, skipReqBody)
 			require.False(t, skipRespBody)
 
