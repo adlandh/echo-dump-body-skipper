@@ -22,80 +22,104 @@ func newContext(method, path, route string, body io.Reader) echo.Context {
 }
 
 func TestSkipper(t *testing.T) {
-	t.Run("no config returns false", func(t *testing.T) {
-		skipper := NewEchoDumpBodySkipper(SkipperConf{})
-
-		ctx := newContext(http.MethodGet, "/ping/121?qs=1", "/ping/:id", nil)
-		skipReqBody, skipRespBody := skipper.Skip(ctx)
-		require.False(t, skipReqBody)
-		require.False(t, skipRespBody)
-	})
-
-	t.Run("exclude response body via regex", func(t *testing.T) {
-		skipper := NewEchoDumpBodySkipper(SkipperConf{
-			DumpNoResponseBodyForPaths: []string{
-				"^/ping/121$",
+	tests := []struct {
+		name                      string
+		conf                      SkipperConf
+		method                    string
+		path                      string
+		route                     string
+		body                      io.Reader
+		wantSkipReq, wantSkipResp bool
+	}{
+		{
+			name:         "no config returns false",
+			conf:         SkipperConf{},
+			method:       http.MethodGet,
+			path:         "/ping/121?qs=1",
+			route:        "/ping/:id",
+			wantSkipReq:  false,
+			wantSkipResp: false,
+		},
+		{
+			name: "exclude response body via regex",
+			conf: SkipperConf{
+				DumpNoResponseBodyForPaths: []string{
+					"^/ping/121$",
+				},
 			},
+			method:       http.MethodGet,
+			path:         "/ping/121?sdsdds=1212",
+			route:        "/ping/:id",
+			wantSkipReq:  false,
+			wantSkipResp: true,
+		},
+		{
+			name: "exclude request body via endpoint",
+			conf: SkipperConf{
+				DumpNoRequestBodyForPaths: []string{
+					"/ping/:id",
+				},
+			},
+			method:       http.MethodGet,
+			path:         "/ping/123",
+			route:        "/ping/:id",
+			body:         strings.NewReader("test"),
+			wantSkipReq:  true,
+			wantSkipResp: false,
+		},
+		{
+			name: "invalid regex is ignored",
+			conf: SkipperConf{
+				DumpNoResponseBodyForPaths: []string{
+					"[",
+				},
+			},
+			method:       http.MethodGet,
+			path:         "/ping/121",
+			route:        "/ping/:id",
+			wantSkipReq:  false,
+			wantSkipResp: false,
+		},
+		{
+			name: "exclude both request and response bodies",
+			conf: SkipperConf{
+				DumpNoRequestBodyForPaths: []string{
+					"/ping/:id",
+				},
+				DumpNoResponseBodyForPaths: []string{
+					"^/ping/121$",
+				},
+			},
+			method:       http.MethodGet,
+			path:         "/ping/121",
+			route:        "/ping/:id",
+			body:         strings.NewReader("test"),
+			wantSkipReq:  true,
+			wantSkipResp: true,
+		},
+		{
+			name: "regex non-match does not skip",
+			conf: SkipperConf{
+				DumpNoResponseBodyForPaths: []string{
+					"^/pong/123$",
+				},
+			},
+			method:       http.MethodGet,
+			path:         "/ping/121",
+			route:        "/ping/:id",
+			wantSkipReq:  false,
+			wantSkipResp: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skipper := NewEchoDumpBodySkipper(tt.conf)
+
+			ctx := newContext(tt.method, tt.path, tt.route, tt.body)
+			skipReqBody, skipRespBody := skipper.Skip(ctx)
+			require.Equal(t, tt.wantSkipReq, skipReqBody)
+			require.Equal(t, tt.wantSkipResp, skipRespBody)
 		})
-
-		ctx := newContext(http.MethodGet, "/ping/121?sdsdds=1212", "/ping/:id", nil)
-		skipReqBody, skipRespBody := skipper.Skip(ctx)
-		require.False(t, skipReqBody)
-		require.True(t, skipRespBody)
-	})
-
-	t.Run("exclude request body via endpoint", func(t *testing.T) {
-		skipper := NewEchoDumpBodySkipper(SkipperConf{
-			DumpNoRequestBodyForPaths: []string{
-				"/ping/:id",
-			},
-		})
-
-		ctx := newContext(http.MethodGet, "/ping/123", "/ping/:id", strings.NewReader("test"))
-		skipReqBody, skipRespBody := skipper.Skip(ctx)
-		require.True(t, skipReqBody)
-		require.False(t, skipRespBody)
-	})
-
-	t.Run("invalid regex is ignored", func(t *testing.T) {
-		skipper := NewEchoDumpBodySkipper(SkipperConf{
-			DumpNoResponseBodyForPaths: []string{
-				"[",
-			},
-		})
-
-		ctx := newContext(http.MethodGet, "/ping/121", "/ping/:id", nil)
-		skipReqBody, skipRespBody := skipper.Skip(ctx)
-		require.False(t, skipReqBody)
-		require.False(t, skipRespBody)
-	})
-
-	t.Run("exclude both request and response bodies", func(t *testing.T) {
-		skipper := NewEchoDumpBodySkipper(SkipperConf{
-			DumpNoRequestBodyForPaths: []string{
-				"/ping/:id",
-			},
-			DumpNoResponseBodyForPaths: []string{
-				"^/ping/121$",
-			},
-		})
-
-		ctx := newContext(http.MethodGet, "/ping/121", "/ping/:id", strings.NewReader("test"))
-		skipReqBody, skipRespBody := skipper.Skip(ctx)
-		require.True(t, skipReqBody)
-		require.True(t, skipRespBody)
-	})
-
-	t.Run("regex non-match does not skip", func(t *testing.T) {
-		skipper := NewEchoDumpBodySkipper(SkipperConf{
-			DumpNoResponseBodyForPaths: []string{
-				"^/pong/123$",
-			},
-		})
-
-		ctx := newContext(http.MethodGet, "/ping/121", "/ping/:id", nil)
-		skipReqBody, skipRespBody := skipper.Skip(ctx)
-		require.False(t, skipReqBody)
-		require.False(t, skipRespBody)
-	})
+	}
 }

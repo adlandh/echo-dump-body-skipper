@@ -8,8 +8,11 @@ import (
 )
 
 type BodySkipper struct {
-	Skip                                          func(echo.Context) (skipReqBody bool, skipRespBody bool)
-	regexExcludedPathsReq, regexExcludedPathsResp []*regexp.Regexp
+	Skip                   func(echo.Context) (skipReqBody bool, skipRespBody bool)
+	exactExcludedPathsReq  map[string]struct{}
+	exactExcludedPathsResp map[string]struct{}
+	regexExcludedPathsReq  []*regexp.Regexp
+	regexExcludedPathsResp []*regexp.Regexp
 }
 
 type SkipperConf struct {
@@ -23,9 +26,13 @@ type SkipperConf struct {
 func (b *BodySkipper) prepareRegexps(config SkipperConf) {
 	b.regexExcludedPathsResp = make([]*regexp.Regexp, 0, len(config.DumpNoResponseBodyForPaths))
 	b.regexExcludedPathsReq = make([]*regexp.Regexp, 0, len(config.DumpNoRequestBodyForPaths))
+	b.exactExcludedPathsResp = make(map[string]struct{}, len(config.DumpNoResponseBodyForPaths))
+	b.exactExcludedPathsReq = make(map[string]struct{}, len(config.DumpNoRequestBodyForPaths))
 
 	if len(config.DumpNoResponseBodyForPaths) > 0 {
 		for _, path := range config.DumpNoResponseBodyForPaths {
+			b.exactExcludedPathsResp[path] = struct{}{}
+
 			regexExcludedPath, err := regexp.Compile(path)
 			if err != nil {
 				// if the pattern is invalid / not regular expression - just ignore it
@@ -38,6 +45,8 @@ func (b *BodySkipper) prepareRegexps(config SkipperConf) {
 
 	if len(config.DumpNoRequestBodyForPaths) > 0 {
 		for _, path := range config.DumpNoRequestBodyForPaths {
+			b.exactExcludedPathsReq[path] = struct{}{}
+
 			regexExcludedPath, err := regexp.Compile(path)
 			if err != nil {
 				// if the pattern is invalid / not regular expression - just ignore it
@@ -49,19 +58,11 @@ func (b *BodySkipper) prepareRegexps(config SkipperConf) {
 	}
 }
 
-func isExcluded(path string, endpoint string, regexps []*regexp.Regexp, endpoints []string) bool {
-	if len(endpoints) == 0 {
-		return false
-	}
-
-	for _, endpointExcluded := range endpoints {
-		if endpointExcluded == endpoint {
+func isExcluded(path string, endpoint string, regexps []*regexp.Regexp, endpoints map[string]struct{}) bool {
+	if len(endpoints) > 0 {
+		if _, ok := endpoints[endpoint]; ok {
 			return true
 		}
-	}
-
-	if len(regexps) == 0 {
-		return false
 	}
 
 	for _, regexExcludedPath := range regexps {
@@ -87,8 +88,8 @@ func NewEchoDumpBodySkipper(config SkipperConf) *BodySkipper {
 	b.prepareRegexps(config)
 
 	b.Skip = func(c echo.Context) (bool, bool) {
-		skipReqBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsReq, config.DumpNoRequestBodyForPaths)
-		skipRespBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsResp, config.DumpNoResponseBodyForPaths)
+		skipReqBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsReq, b.exactExcludedPathsReq)
+		skipRespBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsResp, b.exactExcludedPathsResp)
 
 		return skipReqBody, skipRespBody
 	}

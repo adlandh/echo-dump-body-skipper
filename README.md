@@ -52,9 +52,10 @@ Each list can include:
 Matching rules:
 
 - Exact route checks compare against `echo.Context.Path()`
+- For regex patterns, prefer anchoring with `^...$` for clarity and to avoid unintended matches
 - Regex checks compare against `echo.Context.Request().URL.Path`
 - Query strings are ignored for regex matching since only the path is checked
-- Invalid regex patterns are ignored
+- Invalid regex patterns are silently ignored
 
 ### Examples
 
