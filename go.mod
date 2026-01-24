@@ -1,4 +1,4 @@
-module github.com/adlandh/echo-dump-body-skipper
+module github.com/adlandh/echo-dump-body-skipper/v2
 
 go 1.25.0
 
