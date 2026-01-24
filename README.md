@@ -13,7 +13,7 @@ A skipper utility for the [Echo](https://echo.labstack.com/) web framework in Go
 ## Installation
 
 ```sh
-go get github.com/adlandh/echo-dump-body-skipper
+go get github.com/adlandh/echo-dump-body-skipper/v2
 ```
 
 ## Usage
