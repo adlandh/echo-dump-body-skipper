@@ -4,11 +4,11 @@ package echodumpbodyskipper
 import (
 	"regexp"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 type BodySkipper struct {
-	Skip                   func(echo.Context) (skipReqBody bool, skipRespBody bool)
+	Skip                   func(*echo.Context) (skipReqBody bool, skipRespBody bool)
 	exactExcludedPathsReq  map[string]struct{}
 	exactExcludedPathsResp map[string]struct{}
 	regexExcludedPathsReq  []*regexp.Regexp
@@ -78,7 +78,7 @@ func NewEchoDumpBodySkipper(config SkipperConf) *BodySkipper {
 	b := &BodySkipper{}
 
 	if len(config.DumpNoResponseBodyForPaths) == 0 && len(config.DumpNoRequestBodyForPaths) == 0 {
-		b.Skip = func(c echo.Context) (bool, bool) {
+		b.Skip = func(*echo.Context) (bool, bool) {
 			return false, false
 		}
 
@@ -87,7 +87,7 @@ func NewEchoDumpBodySkipper(config SkipperConf) *BodySkipper {
 
 	b.prepareRegexps(config)
 
-	b.Skip = func(c echo.Context) (bool, bool) {
+	b.Skip = func(c *echo.Context) (bool, bool) {
 		skipReqBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsReq, b.exactExcludedPathsReq)
 		skipRespBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsResp, b.exactExcludedPathsResp)
 

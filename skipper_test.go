@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 )
 
-func newContext(method, path, route string, body io.Reader) echo.Context {
+func newContext(method, path, route string, body io.Reader) *echo.Context {
 	router := echo.New()
 	req := httptest.NewRequest(method, path, body)
 	rec := httptest.NewRecorder()
