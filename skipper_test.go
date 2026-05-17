@@ -166,19 +166,28 @@ func TestSkipper(t *testing.T) {
 }
 
 func TestNew_InvalidRegexReturnsError(t *testing.T) {
-	t.Run("invalid request pattern", func(t *testing.T) {
-		_, err := New(SkipperConf{
-			DumpNoRequestBodyForPaths: []string{"["},
-		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "DumpNoRequestBodyForPaths")
-	})
+	tests := []struct {
+		name     string
+		conf     SkipperConf
+		wantField string
+	}{
+		{
+			name:      "invalid request pattern",
+			conf:      SkipperConf{DumpNoRequestBodyForPaths: []string{"["}},
+			wantField: "DumpNoRequestBodyForPaths",
+		},
+		{
+			name:      "invalid response pattern",
+			conf:      SkipperConf{DumpNoResponseBodyForPaths: []string{"("}},
+			wantField: "DumpNoResponseBodyForPaths",
+		},
+	}
 
-	t.Run("invalid response pattern", func(t *testing.T) {
-		_, err := New(SkipperConf{
-			DumpNoResponseBodyForPaths: []string{"("},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(tt.conf)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantField)
 		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "DumpNoResponseBodyForPaths")
-	})
+	}
 }
