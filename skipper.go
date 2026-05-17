@@ -2,67 +2,74 @@
 package echodumpbodyskipper
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 )
 
-type BodySkipper struct {
-	Skip                   func(*echo.Context) (skipReqBody bool, skipRespBody bool)
-	exactExcludedPathsReq  map[string]struct{}
-	exactExcludedPathsResp map[string]struct{}
-	regexExcludedPathsReq  []*regexp.Regexp
-	regexExcludedPathsResp []*regexp.Regexp
-}
+// Skipper reports, for the current request, whether the request body and/or
+// response body should be skipped from dumping. It is suitable for use as a
+// BodySkipper in middlewares such as echo-otel-middleware and
+// echo-sentry-middleware.
+type Skipper func(c *echo.Context) (skipReqBody bool, skipRespBody bool)
 
+// SkipperConf configures which paths should have their request and/or response
+// bodies excluded from dumping.
 type SkipperConf struct {
-	// paths (regular expressions) or endpoints (ex: `/ping/:id`) to exclude from dumping response bodies
+	// DumpNoResponseBodyForPaths lists patterns whose responses should not be
+	// dumped. Entries containing `/:` or `/*` (or ending in `*`) are treated as
+	// Echo route templates and matched against c.Path(). All other entries are
+	// treated as regular expressions matched against the request URL path; they
+	// are auto-anchored with ^...$ so a literal like "/users" matches "/users"
+	// exactly and not "/users/123".
 	DumpNoResponseBodyForPaths []string
 
-	// paths (regular expressions) or endpoints (ex: `/ping/:id`) to exclude from dumping request bodies
+	// DumpNoRequestBodyForPaths lists patterns whose requests should not be
+	// dumped. See DumpNoResponseBodyForPaths for matching rules.
 	DumpNoRequestBodyForPaths []string
 }
 
-func (b *BodySkipper) prepareRegexps(config SkipperConf) {
-	b.regexExcludedPathsResp = make([]*regexp.Regexp, 0, len(config.DumpNoResponseBodyForPaths))
-	b.regexExcludedPathsReq = make([]*regexp.Regexp, 0, len(config.DumpNoRequestBodyForPaths))
-	b.exactExcludedPathsResp = make(map[string]struct{}, len(config.DumpNoResponseBodyForPaths))
-	b.exactExcludedPathsReq = make(map[string]struct{}, len(config.DumpNoRequestBodyForPaths))
+// isRouteTemplate reports whether p looks like an Echo route template
+// (containing a `:param` or `*` segment) rather than a regular expression.
+func isRouteTemplate(p string) bool {
+	return strings.Contains(p, "/:") || strings.Contains(p, "/*") || strings.HasSuffix(p, "*")
+}
 
-	if len(config.DumpNoResponseBodyForPaths) > 0 {
-		for _, path := range config.DumpNoResponseBodyForPaths {
-			b.exactExcludedPathsResp[path] = struct{}{}
+func classifyPaths(field string, paths []string) (map[string]struct{}, []*regexp.Regexp, error) {
+	exact := make(map[string]struct{}, len(paths))
+	regexes := make([]*regexp.Regexp, 0, len(paths))
 
-			regexExcludedPath, err := regexp.Compile(path)
-			if err != nil {
-				// if the pattern is invalid / not regular expression - just ignore it
-				continue
-			}
-
-			b.regexExcludedPathsResp = append(b.regexExcludedPathsResp, regexExcludedPath)
+	for _, path := range paths {
+		if isRouteTemplate(path) {
+			exact[path] = struct{}{}
+			continue
 		}
+
+		pattern := path
+		if !strings.HasPrefix(pattern, "^") {
+			pattern = "^" + pattern
+		}
+
+		if !strings.HasSuffix(pattern, "$") {
+			pattern += "$"
+		}
+
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: invalid regex %q: %w", field, path, err)
+		}
+
+		regexes = append(regexes, re)
 	}
 
-	if len(config.DumpNoRequestBodyForPaths) > 0 {
-		for _, path := range config.DumpNoRequestBodyForPaths {
-			b.exactExcludedPathsReq[path] = struct{}{}
-
-			regexExcludedPath, err := regexp.Compile(path)
-			if err != nil {
-				// if the pattern is invalid / not regular expression - just ignore it
-				continue
-			}
-
-			b.regexExcludedPathsReq = append(b.regexExcludedPathsReq, regexExcludedPath)
-		}
-	}
+	return exact, regexes, nil
 }
 
 func isExcluded(path string, endpoint string, regexps []*regexp.Regexp, endpoints map[string]struct{}) bool {
-	if len(endpoints) > 0 {
-		if _, ok := endpoints[endpoint]; ok {
-			return true
-		}
+	if _, ok := endpoints[endpoint]; ok {
+		return true
 	}
 
 	for _, regexExcludedPath := range regexps {
@@ -74,25 +81,33 @@ func isExcluded(path string, endpoint string, regexps []*regexp.Regexp, endpoint
 	return false
 }
 
-func NewEchoDumpBodySkipper(config SkipperConf) *BodySkipper {
-	b := &BodySkipper{}
-
+// New builds a Skipper from the given configuration. When the config is empty,
+// the returned Skipper is a no-op that always returns (false, false). An error
+// is returned if any non-template pattern in the configuration fails to
+// compile as a regular expression.
+func New(config SkipperConf) (Skipper, error) {
 	if len(config.DumpNoResponseBodyForPaths) == 0 && len(config.DumpNoRequestBodyForPaths) == 0 {
-		b.Skip = func(*echo.Context) (bool, bool) {
+		return func(*echo.Context) (bool, bool) {
 			return false, false
-		}
-
-		return b
+		}, nil
 	}
 
-	b.prepareRegexps(config)
+	exactResp, regexResp, err := classifyPaths("DumpNoResponseBodyForPaths", config.DumpNoResponseBodyForPaths)
+	if err != nil {
+		return nil, err
+	}
 
-	b.Skip = func(c *echo.Context) (bool, bool) {
-		skipReqBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsReq, b.exactExcludedPathsReq)
-		skipRespBody := isExcluded(c.Request().URL.Path, c.Path(), b.regexExcludedPathsResp, b.exactExcludedPathsResp)
+	exactReq, regexReq, err := classifyPaths("DumpNoRequestBodyForPaths", config.DumpNoRequestBodyForPaths)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(c *echo.Context) (bool, bool) {
+		urlPath := c.Request().URL.Path
+		route := c.Path()
+		skipReqBody := isExcluded(urlPath, route, regexReq, exactReq)
+		skipRespBody := isExcluded(urlPath, route, regexResp, exactResp)
 
 		return skipReqBody, skipRespBody
-	}
-
-	return b
+	}, nil
 }

@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -22,104 +21,65 @@ func newContext(method, path, route string, body io.Reader) *echo.Context {
 }
 
 func TestSkipper(t *testing.T) {
+	req := func(paths ...string) SkipperConf { return SkipperConf{DumpNoRequestBodyForPaths: paths} }
+	resp := func(paths ...string) SkipperConf { return SkipperConf{DumpNoResponseBodyForPaths: paths} }
+	both := func(reqs, resps []string) SkipperConf {
+		return SkipperConf{DumpNoRequestBodyForPaths: reqs, DumpNoResponseBodyForPaths: resps}
+	}
+
 	tests := []struct {
 		name                      string
 		conf                      SkipperConf
-		method                    string
-		path                      string
-		route                     string
-		body                      io.Reader
+		path, route               string
 		wantSkipReq, wantSkipResp bool
 	}{
+		{"no config returns false", SkipperConf{}, "/ping/121?qs=1", "/ping/:id", false, false},
+		{"exclude response body via regex", resp("^/ping/121$"), "/ping/121?sdsdds=1212", "/ping/:id", false, true},
+		{"exclude request body via endpoint", req("/ping/:id"), "/ping/123", "/ping/:id", true, false},
+		{"exclude both request and response bodies", both([]string{"/ping/:id"}, []string{"^/ping/121$"}), "/ping/121", "/ping/:id", true, true},
+		{"literal path is anchored - does not match longer URL", resp("/users"), "/users/123", "/users/:id", false, false},
+		{"literal path matches exactly", resp("/users"), "/users", "/users", false, true},
+		{"route template is not treated as regex against URL path", req("/ping/:id"), "/ping/:id-debug", "/other/:id", false, false},
+		{"wildcard route template matched via endpoint", req("/files/*"), "/files/a/b", "/files/*", true, false},
+		{"regex non-match does not skip", resp("^/pong/123$"), "/ping/121", "/ping/:id", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skipper, err := New(tt.conf)
+			require.NoError(t, err)
+
+			ctx := newContext(http.MethodGet, tt.path, tt.route, nil)
+			skipReqBody, skipRespBody := skipper(ctx)
+			require.Equal(t, tt.wantSkipReq, skipReqBody)
+			require.Equal(t, tt.wantSkipResp, skipRespBody)
+		})
+	}
+}
+
+func TestNew_InvalidRegexReturnsError(t *testing.T) {
+	tests := []struct {
+		name     string
+		conf     SkipperConf
+		wantField string
+	}{
 		{
-			name:         "no config returns false",
-			conf:         SkipperConf{},
-			method:       http.MethodGet,
-			path:         "/ping/121?qs=1",
-			route:        "/ping/:id",
-			wantSkipReq:  false,
-			wantSkipResp: false,
+			name:      "invalid request pattern",
+			conf:      SkipperConf{DumpNoRequestBodyForPaths: []string{"["}},
+			wantField: "DumpNoRequestBodyForPaths",
 		},
 		{
-			name: "exclude response body via regex",
-			conf: SkipperConf{
-				DumpNoResponseBodyForPaths: []string{
-					"^/ping/121$",
-				},
-			},
-			method:       http.MethodGet,
-			path:         "/ping/121?sdsdds=1212",
-			route:        "/ping/:id",
-			wantSkipReq:  false,
-			wantSkipResp: true,
-		},
-		{
-			name: "exclude request body via endpoint",
-			conf: SkipperConf{
-				DumpNoRequestBodyForPaths: []string{
-					"/ping/:id",
-				},
-			},
-			method:       http.MethodGet,
-			path:         "/ping/123",
-			route:        "/ping/:id",
-			body:         strings.NewReader("test"),
-			wantSkipReq:  true,
-			wantSkipResp: false,
-		},
-		{
-			name: "invalid regex is ignored",
-			conf: SkipperConf{
-				DumpNoResponseBodyForPaths: []string{
-					"[",
-				},
-			},
-			method:       http.MethodGet,
-			path:         "/ping/121",
-			route:        "/ping/:id",
-			wantSkipReq:  false,
-			wantSkipResp: false,
-		},
-		{
-			name: "exclude both request and response bodies",
-			conf: SkipperConf{
-				DumpNoRequestBodyForPaths: []string{
-					"/ping/:id",
-				},
-				DumpNoResponseBodyForPaths: []string{
-					"^/ping/121$",
-				},
-			},
-			method:       http.MethodGet,
-			path:         "/ping/121",
-			route:        "/ping/:id",
-			body:         strings.NewReader("test"),
-			wantSkipReq:  true,
-			wantSkipResp: true,
-		},
-		{
-			name: "regex non-match does not skip",
-			conf: SkipperConf{
-				DumpNoResponseBodyForPaths: []string{
-					"^/pong/123$",
-				},
-			},
-			method:       http.MethodGet,
-			path:         "/ping/121",
-			route:        "/ping/:id",
-			wantSkipReq:  false,
-			wantSkipResp: false,
+			name:      "invalid response pattern",
+			conf:      SkipperConf{DumpNoResponseBodyForPaths: []string{"("}},
+			wantField: "DumpNoResponseBodyForPaths",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			skipper := NewEchoDumpBodySkipper(tt.conf)
-
-			ctx := newContext(tt.method, tt.path, tt.route, tt.body)
-			skipReqBody, skipRespBody := skipper.Skip(ctx)
-			require.Equal(t, tt.wantSkipReq, skipReqBody)
-			require.Equal(t, tt.wantSkipResp, skipRespBody)
+			_, err := New(tt.conf)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantField)
 		})
 	}
 }
