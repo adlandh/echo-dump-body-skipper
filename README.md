@@ -8,7 +8,7 @@ A skipper utility for the [Echo](https://echo.labstack.com/) web framework in Go
     - [echo-sentry-middleware](https://github.com/adlandh/echo-sentry-middleware)
 - Supports both exact endpoint matching and regular expression pattern matching
 - Separate skip lists for request and response bodies
-- Safe behavior when config is empty or regex patterns are invalid
+- Safe behavior when config is empty; invalid regex patterns are reported as errors at construction time
 
 ## Installation
 
@@ -24,16 +24,19 @@ go get github.com/adlandh/echo-dump-body-skipper/v2
 e := echo.New()
 
 // Example: Use skipper to skip body dump for health check endpoint
-skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
+skipper, err := echodumpbodyskipper.New(
 	echodumpbodyskipper.SkipperConf{
         DumpNoResponseBodyForPaths: []string{"/health"},
 })
+if err != nil {
+    log.Fatal(err)
+}
 
-app.Use(echootelmiddleware.MiddlewareWithConfig(echootelmiddleware.OtelConfig{
+e.Use(echootelmiddleware.MiddlewareWithConfig(echootelmiddleware.OtelConfig{
     AreHeadersDump: true, // dump request && response headers
     IsBodyDump:     true, // dump request && response body
     // No dump for health check endpoint
-    BodySkipper: skipper.Skip,
+    BodySkipper: skipper,
 }))
 ```
 
@@ -51,18 +54,18 @@ Each list can include:
 
 Matching rules:
 
-- Exact route checks compare against `echo.Context.Path()`
-- For regex patterns, prefer anchoring with `^...$` for clarity and to avoid unintended matches
-- Regex checks compare against `echo.Context.Request().URL.Path`
-- Query strings are ignored for regex matching since only the path is checked
-- Invalid regex patterns are silently ignored
+- Entries containing `/:` or `/*` (or ending in `*`) are treated as Echo route templates and matched against `echo.Context.Path()`
+- All other entries are treated as regular expressions and matched against `echo.Context.Request().URL.Path`
+- Regex entries are auto-anchored with `^...$` if not already anchored, so a literal like `/users` matches `/users` exactly and not `/users/123`
+- Query strings are ignored since only the path is checked
+- Invalid regex patterns cause `New` to return an error
 
 ### Examples
 
 Skip request body for any `/users/:id` route while skipping response body for a specific path:
 
 ```go
-skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
+skipper, err := echodumpbodyskipper.New(
 	echodumpbodyskipper.SkipperConf{
 		DumpNoRequestBodyForPaths: []string{
 			"/users/:id",
@@ -79,7 +82,7 @@ skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
 #### echo-otel-middleware
 
 ```go
-skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
+skipper, err := echodumpbodyskipper.New(
 	echodumpbodyskipper.SkipperConf{
 		DumpNoResponseBodyForPaths: []string{
 			"/health",
@@ -90,14 +93,14 @@ skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
 e.Use(echootelmiddleware.MiddlewareWithConfig(echootelmiddleware.OtelConfig{
 	AreHeadersDump: true,
 	IsBodyDump:     true,
-	BodySkipper:    skipper.Skip,
+	BodySkipper:    skipper,
 }))
 ```
 
 #### echo-sentry-middleware
 
 ```go
-skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
+skipper, err := echodumpbodyskipper.New(
 	echodumpbodyskipper.SkipperConf{
 		DumpNoRequestBodyForPaths: []string{
 			"/auth/:provider/callback",
@@ -106,7 +109,7 @@ skipper := echodumpbodyskipper.NewEchoDumpBodySkipper(
 )
 
 e.Use(echosentry.MiddlewareWithConfig(echosentry.Config{
-	BodySkipper: skipper.Skip,
+	BodySkipper: skipper,
 }))
 ```
 
